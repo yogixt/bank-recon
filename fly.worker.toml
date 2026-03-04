@@ -1,0 +1,19 @@
+app = "bank-recon-worker"
+primary_region = "sin"
+
+[build]
+  dockerfile = "backend/Dockerfile.worker"
+
+[env]
+  ENVIRONMENT = "production"
+  PYTHONPATH = "/app"
+  UPLOAD_DIR = "/data/uploads"
+
+[mounts]
+  source = "worker_uploads"
+  destination = "/data/uploads"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 1024

@@ -1,0 +1,34 @@
+app = "bank-recon-api"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  release_command = "alembic upgrade head"
+
+[env]
+  ENVIRONMENT = "production"
+  PYTHONPATH = "/app"
+  UPLOAD_DIR = "/data/uploads"
+
+[mounts]
+  source = "uploads_data"
+  destination = "/data/uploads"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[http_service.concurrency]
+  type = "requests"
+  hard_limit = 200
+  soft_limit = 150
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 1024
