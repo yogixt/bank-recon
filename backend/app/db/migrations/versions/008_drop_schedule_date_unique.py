@@ -13,7 +13,27 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.drop_constraint("scheduled_reconciliations_date_key", "scheduled_reconciliations", type_="unique")
+    # The unique constraint may have different names depending on how it was created.
+    # Try to drop it; if it doesn't exist, that's fine — the goal is already met.
+    op.execute("""
+        DO $$
+        DECLARE
+            cname text;
+        BEGIN
+            SELECT conname INTO cname
+            FROM pg_constraint
+            WHERE conrelid = 'scheduled_reconciliations'::regclass
+              AND contype = 'u'
+              AND EXISTS (
+                  SELECT 1 FROM unnest(conkey) k
+                  JOIN pg_attribute a ON a.attrelid = conrelid AND a.attnum = k
+                  WHERE a.attname = 'date'
+              );
+            IF cname IS NOT NULL THEN
+                EXECUTE format('ALTER TABLE scheduled_reconciliations DROP CONSTRAINT %I', cname);
+            END IF;
+        END $$;
+    """)
 
 
 def downgrade() -> None:
