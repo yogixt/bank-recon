@@ -63,7 +63,8 @@ def run_lms_verification(session_id: uuid.UUID, lms_source_id: uuid.UUID | None 
         cur.execute(
             """SELECT trans_id, amount, payment_ref_no, txn_status, utr_no, bene_name
             FROM lms_entries
-            WHERE data_source_id = %s AND LOWER(TRIM(withdraw_type)) = 'bank'""",
+            WHERE data_source_id = %s AND LOWER(TRIM(withdraw_type)) = 'bank'
+            ORDER BY id""",
             (str(lms_source_id),),
         )
         lms_bank_map: dict[str, dict] = {}

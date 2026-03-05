@@ -15,6 +15,7 @@ from app.models.anomaly import Anomaly
 from app.models.result import ReconciliationResult
 from app.models.session import ReconciliationSession
 from app.schemas.schemas import AnomalyOut, PaginatedResults, ResultRow, SummaryOut, SessionOut
+from app.services.notification import send_reconciliation_notification
 
 router = APIRouter()
 
@@ -200,3 +201,74 @@ async def get_anomalies(
 
     result = await db.execute(query.order_by(severity_rank, Anomaly.id))
     return [AnomalyOut.model_validate(a) for a in result.scalars().all()]
+
+
+@router.post("/results/{session_id}/send-audit-report")
+async def send_audit_report(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually send the detailed audit report email for a completed session."""
+    session_result = await db.execute(
+        select(ReconciliationSession).where(ReconciliationSession.id == session_id)
+    )
+    sess = session_result.scalar_one_or_none()
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    stage1_stats = {
+        "total_searched": sess.total_searched,
+        "total_found": sess.total_found,
+        "success_count": sess.success_count,
+        "failed_count": sess.failed_count,
+        "reversal_count": sess.reversal_count,
+        "not_in_bridge": sess.not_in_bridge_count,
+        "not_in_statement": sess.not_in_statement_count,
+        "total_success_amount": sess.total_success_amount,
+        "total_failed_amount": sess.total_failed_amount,
+        "total_reversal_amount": sess.total_reversal_amount,
+    }
+
+    stage2_result = await db.execute(
+        text(
+            """SELECT stage2_status, COUNT(*) AS count
+            FROM lms_verification_results
+            WHERE session_id = :session_id
+            GROUP BY stage2_status"""
+        ),
+        {"session_id": str(session_id)},
+    )
+    stage2_rows = stage2_result.mappings().all()
+    stage2_stats = {row["stage2_status"]: int(row["count"]) for row in stage2_rows}
+    if stage2_stats:
+        stage2_stats["total"] = sum(stage2_stats.values())
+
+    recon_date_result = await db.execute(
+        text(
+            """SELECT date
+            FROM scheduled_reconciliations
+            WHERE session_id = :session_id
+            ORDER BY date DESC
+            LIMIT 1"""
+        ),
+        {"session_id": str(session_id)},
+    )
+    recon_date = recon_date_result.scalar()
+
+    delivery = send_reconciliation_notification(
+        stage1_stats=stage1_stats,
+        stage2_stats=stage2_stats if stage2_stats else None,
+        session_id=str(session_id),
+        recon_date=recon_date.isoformat() if recon_date else "",
+        include_audit_report=True,
+    )
+
+    if not delivery.get("sent") and delivery.get("failed"):
+        raise HTTPException(status_code=502, detail=f"Email sending failed: {delivery['failed']}")
+
+    return {
+        "message": "Detailed audit report email sent",
+        "session_id": str(session_id),
+        "sent": delivery.get("sent", []),
+        "failed": delivery.get("failed", []),
+    }

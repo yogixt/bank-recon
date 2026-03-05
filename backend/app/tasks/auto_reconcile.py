@@ -243,6 +243,7 @@ def trigger_auto_reconciliation(self, date_str: str):
                 stage2_stats=stage2_stats,
                 session_id=str(session_id),
                 recon_date=date_str,
+                include_audit_report=True,
             )
         except Exception as e:
             logger.error(f"Notification failed (non-fatal): {e}")
@@ -302,6 +303,7 @@ def run_lms_verification_task(self, session_id: str, lms_source_id: str):
                 stage2_stats=stats,
                 session_id=session_id,
                 recon_date=today_ist().isoformat(),
+                include_audit_report=True,
             )
         except Exception as e:
             logger.error(f"Stage 2 notification failed (non-fatal): {e}")
