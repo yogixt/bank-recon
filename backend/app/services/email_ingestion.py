@@ -310,6 +310,11 @@ def _get_msg_attachments(msg) -> list[dict]:
     return attachments
 
 
+def _attachments_have_suffix(attachments: list[dict], suffixes: tuple[str, ...]) -> bool:
+    """Return True when any attachment filename ends with one of suffixes."""
+    return any((a.get("filename", "") or "").lower().endswith(suffixes) for a in attachments)
+
+
 def poll_bank_statement() -> list[str]:
     """Poll AgentMail inbox for HDFC bank statement emails. Returns list of processed message IDs."""
     messages = list_messages()
@@ -319,9 +324,30 @@ def poll_bank_statement() -> list[str]:
         msg_id = msg.message_id
         sender = getattr(msg, "from_", "") or ""
         subject = getattr(msg, "subject", "") or ""
+        prefetched_msg = None
 
-        if _identify_email_type(sender, subject) != "bank_statement":
+        identified_type = _identify_email_type(sender, subject)
+        if identified_type and identified_type != "bank_statement":
             continue
+
+        has_bank_subject = identified_type == "bank_statement"
+
+        # Bank: match by subject OR fallback to .zip/.xls attachment.
+        # Fallback intentionally excludes .xlsx to avoid stealing LMS files.
+        if not has_bank_subject:
+            msg_attachments = _get_msg_attachments(msg)
+            if msg_attachments:
+                if not _attachments_have_suffix(msg_attachments, (".zip", ".xls")):
+                    continue
+            else:
+                try:
+                    prefetched_msg = get_message(str(msg_id))
+                except Exception as e:
+                    logger.exception(f"Error checking bank statement email {msg_id}: {e}")
+                    continue
+                full_attachments = _get_msg_attachments(prefetched_msg)
+                if not _attachments_have_suffix(full_attachments, (".zip", ".xls")):
+                    continue
 
         log_id = _prepare_ingestion_log(
             message_id=str(msg_id),
@@ -333,13 +359,20 @@ def poll_bank_statement() -> list[str]:
             continue
 
         try:
-            full_msg = get_message(str(msg_id))
+            full_msg = prefetched_msg or get_message(str(msg_id))
             attachments = _get_msg_attachments(full_msg)
             if not attachments:
                 _update_ingestion_log(log_id, "skipped", error_message="No attachments found")
                 continue
 
-            att = attachments[0]
+            bank_suffixes = (".zip", ".xls", ".xlsx") if has_bank_subject else (".zip", ".xls")
+            bank_atts = [a for a in attachments if a["filename"].lower().endswith(bank_suffixes)]
+            if not bank_atts:
+                suffix_label = ", ".join(bank_suffixes)
+                _update_ingestion_log(log_id, "skipped", error_message=f"No bank attachment found ({suffix_label})")
+                continue
+
+            att = bank_atts[0]
             att_data = get_attachment(str(msg_id), att["id"])
             file_path = _save_attachment(att_data, att["filename"])
 
@@ -377,9 +410,29 @@ def poll_bridge_file() -> list[str]:
         msg_id = msg.message_id
         sender = getattr(msg, "from_", "") or ""
         subject = getattr(msg, "subject", "") or ""
+        prefetched_msg = None
 
-        if _identify_email_type(sender, subject) != "bridge_file":
+        identified_type = _identify_email_type(sender, subject)
+        if identified_type and identified_type != "bridge_file":
             continue
+
+        has_bridge_subject = identified_type == "bridge_file"
+
+        # Bridge: match by subject OR fallback to .txt/.csv attachment.
+        if not has_bridge_subject:
+            msg_attachments = _get_msg_attachments(msg)
+            if msg_attachments:
+                if not _attachments_have_suffix(msg_attachments, (".txt", ".csv")):
+                    continue
+            else:
+                try:
+                    prefetched_msg = get_message(str(msg_id))
+                except Exception as e:
+                    logger.exception(f"Error checking bridge file email {msg_id}: {e}")
+                    continue
+                full_attachments = _get_msg_attachments(prefetched_msg)
+                if not _attachments_have_suffix(full_attachments, (".txt", ".csv")):
+                    continue
 
         log_id = _prepare_ingestion_log(
             message_id=str(msg_id),
@@ -391,7 +444,7 @@ def poll_bridge_file() -> list[str]:
             continue
 
         try:
-            full_msg = get_message(str(msg_id))
+            full_msg = prefetched_msg or get_message(str(msg_id))
             attachments = _get_msg_attachments(full_msg)
             if not attachments:
                 _update_ingestion_log(log_id, "skipped", error_message="No attachments found")
