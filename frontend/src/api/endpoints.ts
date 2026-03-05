@@ -123,6 +123,11 @@ export async function getAnomalies(sessionId: string): Promise<Anomaly[]> {
   return data;
 }
 
+export async function sendAuditReport(sessionId: string) {
+  const { data } = await client.post(`/results/${sessionId}/send-audit-report`);
+  return data;
+}
+
 // -- History --
 
 export async function getHistory(): Promise<Session[]> {

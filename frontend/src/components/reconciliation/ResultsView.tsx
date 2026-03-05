@@ -1,5 +1,12 @@
 import { useEffect, useState } from 'react';
-import { getSummary, getAnomalies, getDownloadUrl, getLmsSummary, getLmsVerification } from '../../api/endpoints';
+import {
+  getSummary,
+  getAnomalies,
+  getDownloadUrl,
+  getLmsSummary,
+  getLmsVerification,
+  sendAuditReport,
+} from '../../api/endpoints';
 import type { Summary, Anomaly, LmsVerificationResult } from '../../types';
 import TransactionTable from './TransactionTable';
 
@@ -23,6 +30,8 @@ export default function ResultsView({ sessionId }: Props) {
   const [lmsPage, setLmsPage] = useState(1);
   const [lmsTotal, setLmsTotal] = useState(0);
   const [lmsFilter, setLmsFilter] = useState('');
+  const [sendingReport, setSendingReport] = useState(false);
+  const [reportMessage, setReportMessage] = useState<string | null>(null);
   const lmsPageSize = 50;
 
   useEffect(() => {
@@ -61,15 +70,44 @@ export default function ResultsView({ sessionId }: Props) {
     return <span className={`badge ${cls}`}>{status}</span>;
   };
 
+  const handleSendAuditReport = async () => {
+    setSendingReport(true);
+    setReportMessage(null);
+    try {
+      const resp = await sendAuditReport(sessionId);
+      const sent = Array.isArray(resp?.sent) ? resp.sent : [];
+      const failed = Array.isArray(resp?.failed) ? resp.failed : [];
+      if (failed.length > 0) {
+        setReportMessage(`Report send partial: sent ${sent.length}, failed ${failed.length}`);
+      } else {
+        setReportMessage(`Audit report sent to ${sent.join(', ')}`);
+      }
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail;
+      setReportMessage(typeof detail === 'string' ? `Report send failed: ${detail}` : 'Report send failed');
+    } finally {
+      setSendingReport(false);
+    }
+  };
+
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h2>Reconciliation Results</h2>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="btn btn-outline" onClick={handleSendAuditReport} disabled={sendingReport}>
+            {sendingReport ? 'Sending Report...' : 'Send Audit Report'}
+          </button>
           <a href={getDownloadUrl(sessionId)} className="btn btn-success" download>Download CSV</a>
           <a href={`/chat/${sessionId}`} className="btn btn-primary">Chat with AI</a>
         </div>
       </div>
+
+      {reportMessage && (
+        <div className="card" style={{ marginBottom: '1rem', padding: '0.75rem', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+          {reportMessage}
+        </div>
+      )}
 
       <div className="stats-grid">
         <div className="card stat-card">
