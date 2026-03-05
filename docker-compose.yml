@@ -71,6 +71,27 @@ services:
         condition: service_healthy
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
 
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://recon:recon@postgres:5432/bank_recon
+      SYNC_DATABASE_URL: postgresql://recon:recon@postgres:5432/bank_recon
+      REDIS_URL: redis://redis:6379/0
+      PYTHONPATH: /app
+    volumes:
+      - ./backend:/app
+      - uploads:/tmp/bank-recon-uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend

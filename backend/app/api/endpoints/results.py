@@ -6,7 +6,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
@@ -182,10 +182,21 @@ async def download_csv(session_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 
 
 @router.get("/results/{session_id}/anomalies", response_model=list[AnomalyOut])
-async def get_anomalies(session_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Anomaly)
-        .where(Anomaly.session_id == session_id)
-        .order_by(Anomaly.severity.desc(), Anomaly.id)
+async def get_anomalies(
+    session_id: uuid.UUID,
+    include_low: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    severity_rank = case(
+        (Anomaly.severity == "high", 0),
+        (Anomaly.severity == "medium", 1),
+        (Anomaly.severity == "low", 2),
+        else_=3,
     )
+
+    query = select(Anomaly).where(Anomaly.session_id == session_id)
+    if not include_low:
+        query = query.where(Anomaly.severity.in_(["high", "medium"]))
+
+    result = await db.execute(query.order_by(severity_rank, Anomaly.id))
     return [AnomalyOut.model_validate(a) for a in result.scalars().all()]

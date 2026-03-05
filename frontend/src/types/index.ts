@@ -1,11 +1,13 @@
 export interface DataSource {
   id: string;
   name: string;
-  source_type: 'bank_statement' | 'bridge_file';
+  source_type: 'bank_statement' | 'bridge_file' | 'lms_file';
   filename: string;
   status: 'uploading' | 'parsing' | 'ready' | 'failed';
   row_count: number;
   error_message: string | null;
+  data_date_from: string | null;
+  data_date_to: string | null;
   created_at: string;
 }
 
@@ -101,4 +103,80 @@ export interface Anomaly {
   transaction_id: string | null;
   bank_id: string | null;
   amount: number | null;
+}
+
+export interface IngestionLog {
+  id: number;
+  gmail_message_id: string;
+  email_type: string;
+  sender: string | null;
+  subject: string | null;
+  received_at: string | null;
+  processed_at: string | null;
+  attachment_filename: string | null;
+  data_source_id: string | null;
+  status: string;
+  error_message: string | null;
+}
+
+export interface PaginatedIngestionLogs {
+  items: IngestionLog[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface IngestionStats {
+  by_type: Record<string, Record<string, number>>;
+  total: number;
+}
+
+export interface Schedule {
+  id: string;
+  date: string;
+  bank_source_id: string | null;
+  bridge_source_id: string | null;
+  lms_source_id: string | null;
+  bank_data_date_from: string | null;
+  bank_data_date_to: string | null;
+  bridge_data_date_from: string | null;
+  bridge_data_date_to: string | null;
+  lms_data_date_from: string | null;
+  lms_data_date_to: string | null;
+  session_id: string | null;
+  status: string;
+  bank_ingested_at: string | null;
+  bridge_ingested_at: string | null;
+  lms_ingested_at: string | null;
+  triggered_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+export interface ScheduleList {
+  items: Schedule[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface LmsVerificationResult {
+  id: number;
+  session_id: string;
+  transaction_id: string | null;
+  bank_id: string | null;
+  lms_trans_id: string | null;
+  stage1_status: string | null;
+  stage2_status: string | null;
+  bank_amount: number | null;
+  lms_amount: number | null;
+  lms_payment_ref: string | null;
+  lms_txn_status: string | null;
+  lms_utr_no: string | null;
+  lms_bene_name: string | null;
+  mismatch_details: string | null;
+  verified_at: string | null;
 }

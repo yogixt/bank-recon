@@ -15,6 +15,7 @@ from psycopg2.extras import RealDictCursor
 
 from app.config import get_settings
 from app.services.agentmail_client import list_messages, get_message, get_attachment
+from app.services.time_utils import today_ist
 
 logger = logging.getLogger(__name__)
 
@@ -346,18 +347,13 @@ def poll_bank_statement() -> list[str]:
             file_path = _extract_from_zip(file_path)
 
             ds_id = _create_data_source(
-                name=f"Bank Statement {date.today().isoformat()}",
+                name=f"Bank Statement {today_ist().isoformat()}",
                 source_type="bank_statement",
                 filename=os.path.basename(file_path),
                 file_path=file_path,
             )
 
             _update_ingestion_log(log_id, "success", data_source_id=ds_id)
-
-            # Update schedule
-            today = date.today()
-            _get_or_create_schedule(today)
-            _update_schedule_source(today, "bank_source_id", ds_id, "bank_ingested_at")
 
             # Dispatch parse task
             from app.tasks.parse_bank_statement import parse_bank_statement
@@ -401,21 +397,27 @@ def poll_bridge_file() -> list[str]:
                 _update_ingestion_log(log_id, "skipped", error_message="No attachments found")
                 continue
 
-            att = attachments[0]
+            # Guard against mislabeling LMS .xlsx as bridge files.
+            bridge_atts = [
+                a
+                for a in attachments
+                if a["filename"].lower().endswith((".txt", ".csv"))
+            ]
+            if not bridge_atts:
+                _update_ingestion_log(log_id, "skipped", error_message="No .txt/.csv attachment found")
+                continue
+
+            att = bridge_atts[0]
             att_data = get_attachment(str(msg_id), att["id"])
             file_path = _save_attachment(att_data, att["filename"])
             ds_id = _create_data_source(
-                name=f"Bridge File {date.today().isoformat()}",
+                name=f"Bridge File {today_ist().isoformat()}",
                 source_type="bridge_file",
                 filename=att["filename"],
                 file_path=file_path,
             )
 
             _update_ingestion_log(log_id, "success", data_source_id=ds_id)
-
-            today = date.today()
-            _get_or_create_schedule(today)
-            _update_schedule_source(today, "bridge_source_id", ds_id, "bridge_ingested_at")
 
             from app.tasks.parse_bridge_file import parse_bridge_file
             parse_bridge_file.delay(str(ds_id), file_path)
@@ -438,6 +440,7 @@ def poll_lms_file() -> list[str]:
         msg_id = msg.message_id
         sender = getattr(msg, "from_", "") or ""
         subject = getattr(msg, "subject", "") or ""
+        prefetched_msg = None
 
         identified_type = _identify_email_type(sender, subject)
         if identified_type and identified_type != "lms_file":
@@ -451,9 +454,21 @@ def poll_lms_file() -> list[str]:
         if not has_lms_subject:
             # Peek at attachments from listing (if available)
             msg_attachments = _get_msg_attachments(msg)
-            has_xlsx = any(a["filename"].lower().endswith(".xlsx") for a in msg_attachments)
-            if not has_xlsx:
-                continue
+            if msg_attachments:
+                has_xlsx = any(a["filename"].lower().endswith(".xlsx") for a in msg_attachments)
+                if not has_xlsx:
+                    continue
+            else:
+                # Some list APIs omit attachment metadata; fetch full message to detect LMS files.
+                try:
+                    prefetched_msg = get_message(str(msg_id))
+                except Exception as e:
+                    logger.exception(f"Error checking LMS email {msg_id}: {e}")
+                    continue
+                full_attachments = _get_msg_attachments(prefetched_msg)
+                has_xlsx = any(a["filename"].lower().endswith(".xlsx") for a in full_attachments)
+                if not has_xlsx:
+                    continue
 
         log_id = _prepare_ingestion_log(
             message_id=str(msg_id),
@@ -465,7 +480,7 @@ def poll_lms_file() -> list[str]:
             continue
 
         try:
-            full_msg = get_message(str(msg_id))
+            full_msg = prefetched_msg or get_message(str(msg_id))
             attachments = _get_msg_attachments(full_msg)
             xlsx_atts = [a for a in attachments if a["filename"].lower().endswith(".xlsx")]
             if not xlsx_atts:
@@ -476,17 +491,13 @@ def poll_lms_file() -> list[str]:
             att_data = get_attachment(str(msg_id), att["id"])
             file_path = _save_attachment(att_data, att["filename"])
             ds_id = _create_data_source(
-                name=f"LMS File {date.today().isoformat()}",
+                name=f"LMS File {today_ist().isoformat()}",
                 source_type="lms_file",
                 filename=att["filename"],
                 file_path=file_path,
             )
 
             _update_ingestion_log(log_id, "success", data_source_id=ds_id)
-
-            today = date.today()
-            _get_or_create_schedule(today)
-            _update_schedule_source(today, "lms_source_id", ds_id, "lms_ingested_at")
 
             from app.tasks.parse_lms_file import parse_lms_file
             parse_lms_file.delay(str(ds_id), file_path)

@@ -16,3 +16,5 @@ outputs/
 test-selenium.py
 test_statement.csv
 frontend/test-frontend-upload.ts
+
+backend/.secrets/

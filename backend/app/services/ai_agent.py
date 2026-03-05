@@ -10,6 +10,8 @@ Skills:
 """
 
 import json
+import logging
+import re
 import uuid
 
 import google.generativeai as genai
@@ -17,6 +19,8 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def _conn():
@@ -282,13 +286,133 @@ SKILLS = {
 class GeminiAgent:
     def __init__(self):
         settings = get_settings()
-        if not settings.GEMINI_API_KEY:
-            raise ValueError("GEMINI_API_KEY not configured")
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel("gemini-2.0-flash")
+        self.model_name = "gemini-2.0-flash"
+        self.model = None
 
-    def _pick_skills(self, user_message: str) -> list[str]:
+        if not settings.GEMINI_API_KEY:
+            logger.warning("GEMINI_API_KEY not configured; using deterministic fallback for chat responses")
+            return
+
+        genai.configure(api_key=settings.GEMINI_API_KEY)
+        self.model = genai.GenerativeModel(self.model_name)
+
+    @staticmethod
+    def _is_quota_or_rate_limit_error(exc: Exception) -> bool:
+        msg = str(exc).lower()
+        signals = [
+            "429",
+            "quota exceeded",
+            "resource_exhausted",
+            "rate limit",
+            "too many requests",
+            "retry in",
+        ]
+        return any(s in msg for s in signals)
+
+    def _pick_skills_heuristic(self, user_message: str) -> list[dict]:
+        """Fallback skill router when LLM routing is unavailable."""
+        text = (user_message or "").lower()
+        calls: list[dict] = []
+
+        def add(skill: str, **kwargs):
+            call = {"skill": skill, **kwargs}
+            if call not in calls:
+                calls.append(call)
+
+        if "overview" in text or "summary" in text or "status" in text or "report" in text:
+            add("session_overview")
+
+        if "failed" in text:
+            add("filter_by_status", status="MATCHED_FAILED")
+        if "success" in text:
+            add("filter_by_status", status="MATCHED_SUCCESS")
+        if "reversal" in text:
+            add("reversal_analysis")
+        if "branch" in text:
+            add("branch_breakdown")
+        if "anomal" in text:
+            add("anomaly_details")
+        if "amount" in text or "debit" in text or "credit" in text:
+            add("amount_analysis")
+        if "date" in text or "day" in text:
+            add("date_analysis")
+        if "not in bridge" in text or "not in statement" in text or "missing" in text:
+            add("error_summary")
+
+        txn_match = re.search(r"\b[A-Z0-9]{6,}\b", user_message.upper())
+        if txn_match and ("transaction" in text or "txn" in text or "id" in text):
+            add("lookup_transaction", transaction_id=txn_match.group(0))
+
+        if not calls:
+            add("session_overview")
+
+        return calls
+
+    def _build_fallback_response(self, user_message: str, skill_data: dict, reason: str) -> str:
+        """Generate a deterministic response from SQL skill outputs."""
+        lines = [f"{reason}. Showing direct data summary instead."]
+
+        overview = skill_data.get("session_overview", {}) if isinstance(skill_data, dict) else {}
+        session = overview.get("session", {}) if isinstance(overview, dict) else {}
+        if isinstance(session, dict) and session:
+            lines.extend([
+                "",
+                "Session overview:",
+                f"- Status: {session.get('status', 'unknown')}",
+                f"- Total searched: {session.get('total_searched', 0)}",
+                f"- Total found: {session.get('total_found', 0)}",
+                f"- Success: {session.get('success_count', 0)}",
+                f"- Failed: {session.get('failed_count', 0)}",
+                f"- Reversals: {session.get('reversal_count', 0)}",
+            ])
+
+        status_data = skill_data.get("filter_by_status") if isinstance(skill_data, dict) else None
+        if isinstance(status_data, dict):
+            lines.extend([
+                "",
+                f"Requested status ({status_data.get('status', 'n/a')}): {status_data.get('total_count', 0)} records",
+            ])
+            samples = status_data.get("samples") or []
+            if samples:
+                sample_ids = [str(s.get("transaction_id")) for s in samples[:5] if s.get("transaction_id")]
+                if sample_ids:
+                    lines.append(f"- Sample transaction IDs: {', '.join(sample_ids)}")
+
+        lookup_data = skill_data.get("lookup_transaction") if isinstance(skill_data, dict) else None
+        if isinstance(lookup_data, list):
+            lines.extend([
+                "",
+                f"Transaction lookup matches: {len(lookup_data)}",
+            ])
+            if lookup_data:
+                preview = [str(r.get("transaction_id")) for r in lookup_data[:5] if r.get("transaction_id")]
+                if preview:
+                    lines.append(f"- Matches: {', '.join(preview)}")
+
+        anomalies = skill_data.get("anomaly_details") if isinstance(skill_data, dict) else None
+        if isinstance(anomalies, list) and anomalies:
+            lines.extend([
+                "",
+                f"Anomalies detected: {len(anomalies)}",
+            ])
+
+        if len(lines) == 1:
+            lines.extend([
+                "",
+                "I could not build a targeted summary from this query. Try asking for:",
+                "- session overview",
+                "- failed transactions",
+                "- reversal analysis",
+                "- branch breakdown",
+            ])
+
+        return "\n".join(lines)
+
+    def _pick_skills(self, user_message: str) -> list[dict]:
         """Use the LLM to decide which skills to call based on the user message."""
+        if not self.model:
+            return self._pick_skills_heuristic(user_message)
+
         skill_list = "\n".join(
             f"- {name}: {info['desc']} (args: {', '.join(info['args'])})"
             for name, info in SKILLS.items()
@@ -318,9 +442,13 @@ Return ONLY valid JSON, no markdown fences."""
                 prompt,
                 generation_config={"temperature": 0, "max_output_tokens": 512},
             )
-            return json.loads(resp.text.strip())
+            parsed = json.loads(resp.text.strip())
+            if isinstance(parsed, list):
+                return parsed
         except Exception:
-            return [{"skill": "session_overview"}]
+            logger.warning("Gemini skill routing failed; using heuristic router")
+
+        return self._pick_skills_heuristic(user_message)
 
     def _execute_skills(self, session_id: str, skill_calls: list[dict]) -> dict:
         """Execute the selected skills and collect results."""
@@ -370,6 +498,13 @@ Instructions:
 - Keep the response professional but conversational
 - Do not make up data — only use what's provided above"""
 
+        if not self.model:
+            return self._build_fallback_response(
+                user_message=user_message,
+                skill_data=skill_data,
+                reason="Gemini model is unavailable",
+            )
+
         try:
             response = self.model.generate_content(
                 prompt,
@@ -377,4 +512,17 @@ Instructions:
             )
             return response.text.strip()
         except Exception as e:
-            return f"Error processing your question: {e}"
+            if self._is_quota_or_rate_limit_error(e):
+                logger.warning("Gemini quota/rate limit hit; serving fallback response")
+                return self._build_fallback_response(
+                    user_message=user_message,
+                    skill_data=skill_data,
+                    reason="Gemini API quota/rate limit reached",
+                )
+
+            logger.exception("Gemini chat generation failed")
+            return self._build_fallback_response(
+                user_message=user_message,
+                skill_data=skill_data,
+                reason="Gemini response generation failed",
+            )

@@ -2,11 +2,24 @@
 
 import uuid
 
+import psycopg2
+
+from app.config import get_settings
 from app.tasks.celery_app import celery
 from app.tasks.progress import publish_progress, update_task_db
 from app.services.fuzzy_matcher import find_fuzzy_matches
 from app.services.anomaly_detector import detect_anomalies
 from app.services.bulk_db import bulk_insert_results, bulk_insert_anomalies
+
+
+def _clear_anomalies(session_id: str):
+    conn = psycopg2.connect(get_settings().SYNC_DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM anomalies WHERE session_id = %s", (session_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @celery.task(bind=True, name="run_ai_analysis")
@@ -40,6 +53,7 @@ def run_ai_analysis(self, session_id: str):
         update_task_db(session_id, "ai_analysis", 50, "Anomaly detection...", "running")
 
         # Anomaly detection
+        _clear_anomalies(session_id)
         anomalies = detect_anomalies(sid)
         if anomalies:
             bulk_insert_anomalies(sid, anomalies)

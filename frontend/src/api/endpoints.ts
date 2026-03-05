@@ -146,3 +146,76 @@ export function getDownloadUrl(sessionId: string): string {
   const base = import.meta.env.VITE_API_URL || '';
   return `${base}/api/results/${sessionId}/download`;
 }
+
+// -- Ingestion --
+
+export async function getIngestionLogs(
+  page: number = 1,
+  pageSize: number = 50,
+  emailType?: string,
+  status?: string,
+) {
+  const params: Record<string, string> = { page: String(page), page_size: String(pageSize) };
+  if (emailType) params.email_type = emailType;
+  if (status) params.status = status;
+  const { data } = await client.get('/ingestion/logs', { params });
+  return data;
+}
+
+export async function getIngestionStats() {
+  const { data } = await client.get('/ingestion/stats');
+  return data;
+}
+
+export async function pollBankStatement() {
+  const { data } = await client.post('/ingestion/poll/bank-statement');
+  return data;
+}
+
+export async function pollBridgeFile() {
+  const { data } = await client.post('/ingestion/poll/bridge-file');
+  return data;
+}
+
+export async function pollLmsFile() {
+  const { data } = await client.post('/ingestion/poll/lms-file');
+  return data;
+}
+
+// -- Schedules --
+
+export async function getSchedules(page: number = 1, pageSize: number = 30) {
+  const { data } = await client.get('/schedules', { params: { page, page_size: pageSize } });
+  return data;
+}
+
+export async function getTodaySchedule() {
+  const { data } = await client.get('/schedules/today');
+  return data;
+}
+
+export async function triggerSchedule(scheduleId: string) {
+  const { data } = await client.post(`/schedules/${scheduleId}/trigger`);
+  return data;
+}
+
+// -- LMS Verification --
+
+export async function getLmsVerification(
+  sessionId: string,
+  page: number = 1,
+  pageSize: number = 50,
+  stage2Status?: string,
+  search?: string,
+) {
+  const params: Record<string, string> = { page: String(page), page_size: String(pageSize) };
+  if (stage2Status) params.stage2_status = stage2Status;
+  if (search) params.search = search;
+  const { data } = await client.get(`/results/${sessionId}/lms-verification`, { params });
+  return data;
+}
+
+export async function getLmsSummary(sessionId: string) {
+  const { data } = await client.get(`/results/${sessionId}/lms-summary`);
+  return data;
+}

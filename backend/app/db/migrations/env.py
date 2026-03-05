@@ -7,6 +7,7 @@ from sqlalchemy import engine_from_config, pool
 from app.models.base import Base
 # Import all models so Base.metadata picks them up
 from app.models import session, bank_entry, bridge_mapping, transaction, result, anomaly, task, data_source  # noqa: F401
+from app.models import email_log, schedule, lms_entry, lms_result  # noqa: F401
 
 config = context.config
 

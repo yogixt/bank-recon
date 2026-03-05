@@ -8,6 +8,19 @@ import {
 } from '../api/endpoints';
 import type { DataSource } from '../types';
 
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  bank_statement: 'Bank Statement',
+  bridge_file: 'Bridge File',
+  lms_file: 'LMS File',
+};
+
+function formatDataDateRange(from: string | null, to: string | null): string {
+  if (!from && !to) return '-';
+  if (from && to && from === to) return from;
+  if (from && to) return `${from} to ${to}`;
+  return from || to || '-';
+}
+
 export default function StoragePage() {
   const [sources, setSources] = useState<DataSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -182,6 +195,7 @@ export default function StoragePage() {
                 <th>Name</th>
                 <th>Type</th>
                 <th>File</th>
+                <th>Data Date</th>
                 <th>Status</th>
                 <th>Rows</th>
                 <th>Uploaded</th>
@@ -192,8 +206,11 @@ export default function StoragePage() {
               {sources.map((ds) => (
                 <tr key={ds.id}>
                   <td>{ds.name}</td>
-                  <td>{ds.source_type === 'bank_statement' ? 'Bank Statement' : 'Bridge File'}</td>
+                  <td>{SOURCE_TYPE_LABELS[ds.source_type] || ds.source_type.replace(/_/g, ' ')}</td>
                   <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{ds.filename}</td>
+                  <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                    {formatDataDateRange(ds.data_date_from, ds.data_date_to)}
+                  </td>
                   <td>
                     {statusBadge(ds.status)}
                     {ds.error_message && (

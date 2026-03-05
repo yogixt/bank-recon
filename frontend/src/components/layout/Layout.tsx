@@ -10,6 +10,8 @@ export default function Layout({ children }: { children: ReactNode }) {
           <nav>
             <Link to="/">Reconcile</Link>
             <Link to="/storage">Storage</Link>
+            <Link to="/ingestion">Ingestion</Link>
+            <Link to="/schedules">Schedules</Link>
             <Link to="/history">History</Link>
           </nav>
         </div>

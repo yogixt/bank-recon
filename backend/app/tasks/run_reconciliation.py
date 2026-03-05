@@ -7,6 +7,7 @@ from app.tasks.celery_app import celery
 from app.tasks.progress import publish_progress, update_task_db
 from app.services.reconciliation import run_reconciliation
 from app.services.bulk_db import bulk_insert_results
+from app.services.time_utils import today_ist
 
 import psycopg2
 from app.config import get_settings
@@ -72,6 +73,17 @@ def run_reconciliation_task(self, session_id: str):
         )
         publish_progress(task_id, 100, msg, "completed")
         update_task_db(session_id, "reconciliation", 100, msg, "completed")
+
+        # Send notification (non-fatal)
+        try:
+            from app.services.notification import send_reconciliation_notification
+            send_reconciliation_notification(
+                stage1_stats=result["statistics"],
+                session_id=session_id,
+                recon_date=today_ist().isoformat(),
+            )
+        except Exception:
+            pass
 
         return result["statistics"]
 

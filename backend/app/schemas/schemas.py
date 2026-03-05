@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 
@@ -19,6 +19,8 @@ class DataSourceOut(BaseModel):
     status: str
     row_count: int = 0
     error_message: Optional[str] = None
+    data_date_from: Optional[date] = None
+    data_date_to: Optional[date] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

@@ -25,8 +25,16 @@ export default function HomePage() {
     listDataSources().then(setDataSources);
   }, []);
 
-  const bankSources = dataSources.filter((ds) => ds.source_type === 'bank_statement' && ds.status === 'ready');
-  const bridgeSources = dataSources.filter((ds) => ds.source_type === 'bridge_file' && ds.status === 'ready');
+  const today = new Date().toISOString().slice(0, 10);
+  const coversToday = (ds: DataSource) => {
+    if (!ds.data_date_from && !ds.data_date_to) return false;
+    if (ds.data_date_from && ds.data_date_from > today) return false;
+    if (ds.data_date_to && ds.data_date_to < today) return false;
+    return true;
+  };
+
+  const bankSources = dataSources.filter((ds) => ds.source_type === 'bank_statement' && ds.status === 'ready' && coversToday(ds));
+  const bridgeSources = dataSources.filter((ds) => ds.source_type === 'bridge_file' && ds.status === 'ready' && coversToday(ds));
 
   const canReconcile = bankSourceId && bridgeSourceId && allUploaded && sessionId;
 
@@ -77,7 +85,7 @@ export default function HomePage() {
               <h3>Bank Statement</h3>
               {bankSources.length === 0 ? (
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                  No bank statements available. <a href="/storage">Upload one first.</a>
+                  No bank statement for today detected. <a href="/storage">Upload today&apos;s file first.</a>
                 </p>
               ) : (
                 <select
@@ -88,7 +96,7 @@ export default function HomePage() {
                   <option value="">Select bank statement...</option>
                   {bankSources.map((ds) => (
                     <option key={ds.id} value={ds.id}>
-                      {ds.name} ({ds.row_count.toLocaleString()} rows)
+                      {ds.name} ({ds.row_count.toLocaleString()} rows, {ds.data_date_from === ds.data_date_to ? ds.data_date_from : `${ds.data_date_from} to ${ds.data_date_to}`})
                     </option>
                   ))}
                 </select>
@@ -99,7 +107,7 @@ export default function HomePage() {
               <h3>Bridge File</h3>
               {bridgeSources.length === 0 ? (
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-                  No bridge files available. <a href="/storage">Upload one first.</a>
+                  No bridge file for today detected. <a href="/storage">Upload today&apos;s file first.</a>
                 </p>
               ) : (
                 <select
@@ -110,7 +118,7 @@ export default function HomePage() {
                   <option value="">Select bridge file...</option>
                   {bridgeSources.map((ds) => (
                     <option key={ds.id} value={ds.id}>
-                      {ds.name} ({ds.row_count.toLocaleString()} rows)
+                      {ds.name} ({ds.row_count.toLocaleString()} rows, {ds.data_date_from === ds.data_date_to ? ds.data_date_from : `${ds.data_date_from} to ${ds.data_date_to}`})
                     </option>
                   ))}
                 </select>

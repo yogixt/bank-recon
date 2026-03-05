@@ -11,6 +11,21 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "/tmp/bank-recon-uploads"
     CORS_ORIGINS: str = "http://localhost:5173"
 
+    # AgentMail
+    AGENTMAIL_API_KEY: str = ""
+    AGENTMAIL_INBOX_ID: str = ""  # e.g. "recon@agentmail.to" or "recon@unomok.com"
+    # Email identification patterns
+    HDFC_SENDER_PATTERN: str = "hdfcbank"
+    HDFC_SUBJECT_PATTERN: str = "Account Statement"
+    HDFC_ZIP_PASSWORD: str = ""  # Password for HDFC encrypted zip (e.g. "BIJ8829")
+    BRIDGE_SUBJECT_PATTERN: str = "Bridge File"
+    LMS_SUBJECT_PATTERN: str = ""
+    NOTIFICATION_RECIPIENTS: str = "bijay@unomok.com"
+    NOTIFICATION_FROM_NAME: str = "Bank Recon System"
+    POLL_INTERVAL_MINUTES: int = 15
+    AUTO_RECONCILE_ENABLED: bool = True
+    STALE_ALERT_HOUR_IST: int = 10
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

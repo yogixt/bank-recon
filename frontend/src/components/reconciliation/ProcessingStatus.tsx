@@ -10,6 +10,7 @@ const TASK_LABELS: Record<string, string> = {
   parse_transactions: 'Transaction IDs',
   reconciliation: 'Reconciliation',
   ai_analysis: 'AI Analysis',
+  lms_verification: 'LMS Verification',
 };
 
 export default function ProcessingStatus({ tasks }: Props) {

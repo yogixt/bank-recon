@@ -1,7 +1,6 @@
 """Anomaly detection: rule-based + statistical methods."""
 
 import uuid
-from collections import Counter
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -37,6 +36,9 @@ def detect_anomalies(session_id: uuid.UUID) -> list[dict]:
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
+        # 0. Session-level scope mismatch (wrong period/account/source combination)
+        anomalies.extend(_detect_scope_mismatch(cur, session_id))
+
         # 1. Duplicate bank IDs in results
         anomalies.extend(_detect_duplicate_bank_ids(cur, session_id))
 
@@ -55,6 +57,55 @@ def detect_anomalies(session_id: uuid.UUID) -> list[dict]:
         return anomalies
     finally:
         conn.close()
+
+
+def _detect_scope_mismatch(cur, session_id: uuid.UUID) -> list[dict]:
+    """Detect sessions where sources are very likely from different scopes.
+
+    Example: one-day statement reconciled against a full historical bridge dump.
+    """
+    cur.execute(
+        """SELECT total_searched, success_count, failed_count, reversal_count,
+                  not_in_bridge_count, not_in_statement_count
+           FROM reconciliation_sessions
+           WHERE id = %s""",
+        (str(session_id),),
+    )
+    row = cur.fetchone()
+    if not row:
+        return []
+
+    total = int(row["total_searched"] or 0)
+    if total < 100:
+        return []
+
+    matched = int(row["success_count"] or 0) + int(row["failed_count"] or 0) + int(row["reversal_count"] or 0)
+    not_in_bridge = int(row["not_in_bridge_count"] or 0)
+    not_in_statement = int(row["not_in_statement_count"] or 0)
+
+    # Hard mismatch: nothing matched at all despite large input.
+    if matched == 0 and (not_in_bridge + not_in_statement) > 0:
+        return [{
+            "anomaly_type": "source_scope_mismatch",
+            "severity": "high",
+            "description": (
+                f"0 matches out of {total:,} searched transactions. "
+                "Selected sources likely belong to different scope (period/account/file set mismatch)."
+            ),
+        }]
+
+    # Soft mismatch: almost everything missing from statement at scale.
+    if total >= 500 and not_in_statement / total >= 0.95:
+        return [{
+            "anomaly_type": "source_scope_mismatch",
+            "severity": "high",
+            "description": (
+                f"{not_in_statement:,}/{total:,} transactions are missing from statement. "
+                "This strongly suggests bank statement period/account does not match the bridge/transaction dataset."
+            ),
+        }]
+
+    return []
 
 
 def _detect_duplicate_bank_ids(cur, session_id: uuid.UUID) -> list[dict]:
@@ -145,27 +196,42 @@ def _detect_amount_outliers(cur, session_id: uuid.UUID) -> list[dict]:
 
 
 def _detect_orphan_bridge_entries(cur, bridge_source_id: uuid.UUID, bank_source_id: uuid.UUID) -> list[dict]:
-    """Find bridge mappings where the bank_id doesn't exist in bank_entries at all."""
+    """Summarize bridge mappings where bank_id doesn't exist in the selected statement."""
+    cur.execute(
+        """
+        SELECT COUNT(*) AS orphan_count
+        FROM bridge_mappings bm
+        LEFT JOIN bank_entries be ON be.data_source_id = %s AND be.bank_id = bm.bank_id
+        WHERE bm.data_source_id = %s AND be.id IS NULL
+        """,
+        (str(bank_source_id), str(bridge_source_id)),
+    )
+    count_row = cur.fetchone()
+    orphan_count = int(count_row["orphan_count"] or 0) if count_row else 0
+    if orphan_count == 0:
+        return []
+
     cur.execute(
         """
         SELECT bm.transaction_id, bm.bank_id
         FROM bridge_mappings bm
         LEFT JOIN bank_entries be ON be.data_source_id = %s AND be.bank_id = bm.bank_id
         WHERE bm.data_source_id = %s AND be.id IS NULL
-        LIMIT 100
+        LIMIT 5
         """,
         (str(bank_source_id), str(bridge_source_id)),
     )
-    results = []
-    for row in cur.fetchall():
-        results.append({
-            "anomaly_type": "orphan_bridge",
-            "severity": "low",
-            "description": f"Bridge maps txn '{row['transaction_id']}' to bank ID '{row['bank_id']}' which doesn't exist in statement",
-            "transaction_id": row["transaction_id"],
-            "bank_id": row["bank_id"],
-        })
-    return results
+    samples = cur.fetchall()
+    examples = ", ".join(f"{row['transaction_id']}->{row['bank_id']}" for row in samples)
+    description = f"{orphan_count:,} bridge mappings point to bank IDs missing from the selected statement"
+    if examples:
+        description += f" (examples: {examples})"
+
+    return [{
+        "anomaly_type": "orphan_bridge",
+        "severity": "low",
+        "description": description,
+    }]
 
 
 def _detect_duplicate_transaction_ids(cur, session_id: uuid.UUID) -> list[dict]:

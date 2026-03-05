@@ -5,6 +5,8 @@ import StoragePage from './pages/StoragePage';
 import ResultsPage from './pages/ResultsPage';
 import HistoryPage from './pages/HistoryPage';
 import ChatPage from './pages/ChatPage';
+import IngestionPage from './pages/IngestionPage';
+import SchedulesPage from './pages/SchedulesPage';
 
 export default function App() {
   return (
@@ -15,6 +17,8 @@ export default function App() {
         <Route path="/results/:id" element={<ResultsPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/chat/:id" element={<ChatPage />} />
+        <Route path="/ingestion" element={<IngestionPage />} />
+        <Route path="/schedules" element={<SchedulesPage />} />
       </Routes>
     </Layout>
   );

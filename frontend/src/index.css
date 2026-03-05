@@ -208,6 +208,21 @@ tbody tr:hover { background: var(--surface-hover); }
 }
 .history-item:hover { background: var(--surface-hover); }
 
+/* Standalone input */
+.input {
+  padding: 0.4375rem 0.625rem;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--text);
+  border-radius: 0.375rem;
+  font-size: 0.8125rem;
+  transition: border-color 0.15s;
+}
+.input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
 /* Responsive */
 @media (max-width: 640px) {
   .upload-grid { grid-template-columns: 1fr; }
