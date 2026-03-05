@@ -1,11 +1,21 @@
 import { useEffect, useState } from 'react';
-import { getSchedules, getTodaySchedule, triggerSchedule } from '../api/endpoints';
-import type { Schedule } from '../types';
+import { getSchedules, getTodaySchedule, triggerSchedule, createSchedule, listDataSources } from '../api/endpoints';
+import type { Schedule, DataSource } from '../types';
 
 export default function SchedulesPage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [todaySchedule, setTodaySchedule] = useState<(Schedule & { exists: boolean }) | null>(null);
   const [triggering, setTriggering] = useState<string | null>(null);
+
+  // Create modal state
+  const [showCreate, setShowCreate] = useState(false);
+  const [dataSources, setDataSources] = useState<DataSource[]>([]);
+  const [createDate, setCreateDate] = useState('');
+  const [createBank, setCreateBank] = useState('');
+  const [createBridge, setCreateBridge] = useState('');
+  const [createLms, setCreateLms] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   const loadData = async () => {
     const [schedulesRes, todayRes] = await Promise.all([
@@ -19,6 +29,40 @@ export default function SchedulesPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const openCreateModal = async () => {
+    setCreateError('');
+    setCreateDate('');
+    setCreateBank('');
+    setCreateBridge('');
+    setCreateLms('');
+    setShowCreate(true);
+    const sources = await listDataSources();
+    setDataSources(sources.filter((s: DataSource) => s.status === 'ready'));
+  };
+
+  const handleCreate = async () => {
+    if (!createDate) {
+      setCreateError('Date is required');
+      return;
+    }
+    setCreating(true);
+    setCreateError('');
+    try {
+      await createSchedule({
+        date: createDate,
+        bank_source_id: createBank || null,
+        bridge_source_id: createBridge || null,
+        lms_source_id: createLms || null,
+      });
+      setShowCreate(false);
+      loadData();
+    } catch (err: any) {
+      setCreateError(err?.response?.data?.detail || 'Failed to create schedule');
+    } finally {
+      setCreating(false);
+    }
+  };
 
   const canTrigger = (s: Schedule) =>
     s.status === 'waiting_sources' &&
@@ -71,9 +115,136 @@ export default function SchedulesPage() {
     );
   };
 
+  const bankSources = dataSources.filter(s => s.source_type === 'bank_statement');
+  const bridgeSources = dataSources.filter(s => s.source_type === 'bridge_file');
+  const lmsSources = dataSources.filter(s => s.source_type === 'lms_file');
+
   return (
     <>
-      <h2>Scheduled Reconciliations</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h2 style={{ margin: 0 }}>Scheduled Reconciliations</h2>
+        <button className="btn btn-primary" onClick={openCreateModal}>
+          + New Schedule
+        </button>
+      </div>
+
+      {/* Create Schedule Modal */}
+      {showCreate && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowCreate(false); }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: '480px', margin: '1rem' }}>
+            <h3 style={{ marginTop: 0 }}>Create New Schedule</h3>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Date *
+                </label>
+                <input
+                  type="date"
+                  value={createDate}
+                  onChange={e => setCreateDate(e.target.value)}
+                  style={{
+                    width: '100%', padding: '0.5rem', marginTop: '0.25rem',
+                    background: 'var(--bg)', border: '1px solid var(--border)',
+                    borderRadius: '6px', color: 'var(--text)', fontSize: '0.875rem',
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Bank Statement
+                </label>
+                <select
+                  value={createBank}
+                  onChange={e => setCreateBank(e.target.value)}
+                  style={{
+                    width: '100%', padding: '0.5rem', marginTop: '0.25rem',
+                    background: 'var(--bg)', border: '1px solid var(--border)',
+                    borderRadius: '6px', color: 'var(--text)', fontSize: '0.875rem',
+                  }}
+                >
+                  <option value="">-- None --</option>
+                  {bankSources.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.data_date_from && s.data_date_to
+                        ? `${s.data_date_from} to ${s.data_date_to}`
+                        : s.filename})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Bridge File
+                </label>
+                <select
+                  value={createBridge}
+                  onChange={e => setCreateBridge(e.target.value)}
+                  style={{
+                    width: '100%', padding: '0.5rem', marginTop: '0.25rem',
+                    background: 'var(--bg)', border: '1px solid var(--border)',
+                    borderRadius: '6px', color: 'var(--text)', fontSize: '0.875rem',
+                  }}
+                >
+                  <option value="">-- None --</option>
+                  {bridgeSources.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.data_date_from && s.data_date_to
+                        ? `${s.data_date_from} to ${s.data_date_to}`
+                        : s.filename})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  LMS File
+                </label>
+                <select
+                  value={createLms}
+                  onChange={e => setCreateLms(e.target.value)}
+                  style={{
+                    width: '100%', padding: '0.5rem', marginTop: '0.25rem',
+                    background: 'var(--bg)', border: '1px solid var(--border)',
+                    borderRadius: '6px', color: 'var(--text)', fontSize: '0.875rem',
+                  }}
+                >
+                  <option value="">-- None --</option>
+                  {lmsSources.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.data_date_from && s.data_date_to
+                        ? `${s.data_date_from} to ${s.data_date_to}`
+                        : s.filename})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {createError && (
+                <div style={{ color: 'var(--danger)', fontSize: '0.8125rem' }}>{createError}</div>
+              )}
+
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                <button className="btn btn-outline" onClick={() => setShowCreate(false)} disabled={creating}>
+                  Cancel
+                </button>
+                <button className="btn btn-primary" onClick={handleCreate} disabled={creating}>
+                  {creating ? 'Creating...' : 'Create Schedule'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Today's status card */}
       {todaySchedule && (

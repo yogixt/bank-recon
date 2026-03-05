@@ -204,6 +204,16 @@ export async function triggerSchedule(scheduleId: string) {
   return data;
 }
 
+export async function createSchedule(body: {
+  date: string;
+  bank_source_id: string | null;
+  bridge_source_id: string | null;
+  lms_source_id: string | null;
+}) {
+  const { data } = await client.post('/schedules', body);
+  return data;
+}
+
 // -- LMS Verification --
 
 export async function getLmsVerification(

@@ -1,13 +1,24 @@
 """API endpoints for scheduled reconciliation management."""
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional
 
 from app.api.deps import get_db
 from app.services.time_utils import today_ist
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
+
+
+class CreateScheduleRequest(BaseModel):
+    date: str  # YYYY-MM-DD
+    bank_source_id: Optional[str] = None
+    bridge_source_id: Optional[str] = None
+    lms_source_id: Optional[str] = None
 
 
 def _covers_target_date(data_date_from, data_date_to, target_date) -> bool:
@@ -77,6 +88,69 @@ async def get_today_schedule(db: AsyncSession = Depends(get_db)):
     if not row:
         return {"exists": False, "date": today.isoformat()}
     return {"exists": True, **dict(row)}
+
+
+@router.post("")
+async def create_schedule(body: CreateScheduleRequest, db: AsyncSession = Depends(get_db)):
+    """Create a new scheduled reconciliation for a given date."""
+    from datetime import date as date_type
+    try:
+        target_date = date_type.fromisoformat(body.date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    # Check if schedule already exists for this date
+    existing = await db.execute(
+        text("SELECT id FROM scheduled_reconciliations WHERE date = :d"),
+        {"d": target_date},
+    )
+    if existing.first():
+        raise HTTPException(status_code=409, detail=f"Schedule already exists for {target_date}")
+
+    # Validate sources exist and are ready, if provided
+    now = datetime.utcnow()
+    source_ids = {
+        "bank": body.bank_source_id,
+        "bridge": body.bridge_source_id,
+        "lms": body.lms_source_id,
+    }
+    for label, src_id in source_ids.items():
+        if src_id:
+            r = await db.execute(
+                text("SELECT id, status FROM data_sources WHERE id = :id"),
+                {"id": src_id},
+            )
+            row = r.mappings().first()
+            if not row:
+                raise HTTPException(status_code=404, detail=f"{label} source not found")
+            if row["status"] != "ready":
+                raise HTTPException(status_code=400, detail=f"{label} source is not ready (status: {row['status']})")
+
+    import uuid
+    schedule_id = str(uuid.uuid4())
+    await db.execute(
+        text(
+            """INSERT INTO scheduled_reconciliations
+               (id, date, bank_source_id, bridge_source_id, lms_source_id,
+                status, bank_ingested_at, bridge_ingested_at, lms_ingested_at, created_at)
+               VALUES (:id, :date, :bank, :bridge, :lms, 'waiting_sources',
+                       :bank_ts, :bridge_ts, :lms_ts, :now)"""
+        ),
+        {
+            "id": schedule_id,
+            "date": target_date,
+            "bank": body.bank_source_id,
+            "bridge": body.bridge_source_id,
+            "lms": body.lms_source_id,
+            "bank_ts": now if body.bank_source_id else None,
+            "bridge_ts": now if body.bridge_source_id else None,
+            "lms_ts": now if body.lms_source_id else None,
+            "now": now,
+        },
+    )
+    await db.commit()
+
+    return {"id": schedule_id, "date": body.date, "status": "waiting_sources", "message": "Schedule created"}
 
 
 @router.post("/{schedule_id}/trigger")
