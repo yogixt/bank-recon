@@ -99,14 +99,6 @@ async def create_schedule(body: CreateScheduleRequest, db: AsyncSession = Depend
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
 
-    # Check if schedule already exists for this date
-    existing = await db.execute(
-        text("SELECT id FROM scheduled_reconciliations WHERE date = :d"),
-        {"d": target_date},
-    )
-    if existing.first():
-        raise HTTPException(status_code=409, detail=f"Schedule already exists for {target_date}")
-
     # Validate sources exist and are ready, if provided
     now = datetime.utcnow()
     source_ids = {
@@ -125,6 +117,42 @@ async def create_schedule(body: CreateScheduleRequest, db: AsyncSession = Depend
                 raise HTTPException(status_code=404, detail=f"{label} source not found")
             if row["status"] != "ready":
                 raise HTTPException(status_code=400, detail=f"{label} source is not ready (status: {row['status']})")
+
+    # Check if schedule already exists for this date — update it instead of rejecting
+    existing = await db.execute(
+        text("SELECT id, status FROM scheduled_reconciliations WHERE date = :d"),
+        {"d": target_date},
+    )
+    existing_row = existing.mappings().first()
+
+    if existing_row:
+        if existing_row["status"] in ("running", "completed"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Schedule for {target_date} is already {existing_row['status']}",
+            )
+        schedule_id = str(existing_row["id"])
+        await db.execute(
+            text(
+                """UPDATE scheduled_reconciliations
+                   SET bank_source_id = COALESCE(:bank, bank_source_id),
+                       bridge_source_id = COALESCE(:bridge, bridge_source_id),
+                       lms_source_id = COALESCE(:lms, lms_source_id),
+                       bank_ingested_at = CASE WHEN :bank IS NOT NULL THEN :now ELSE bank_ingested_at END,
+                       bridge_ingested_at = CASE WHEN :bridge IS NOT NULL THEN :now ELSE bridge_ingested_at END,
+                       lms_ingested_at = CASE WHEN :lms IS NOT NULL THEN :now ELSE lms_ingested_at END
+                   WHERE id = :id"""
+            ),
+            {
+                "id": schedule_id,
+                "bank": body.bank_source_id,
+                "bridge": body.bridge_source_id,
+                "lms": body.lms_source_id,
+                "now": now,
+            },
+        )
+        await db.commit()
+        return {"id": schedule_id, "date": body.date, "status": "waiting_sources", "message": "Schedule updated"}
 
     import uuid
     schedule_id = str(uuid.uuid4())
