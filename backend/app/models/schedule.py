@@ -13,7 +13,7 @@ class ScheduledReconciliation(Base):
     __tablename__ = "scheduled_reconciliations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    date: Mapped[date] = mapped_column(Date, unique=True, nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
     bank_source_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     bridge_source_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
     lms_source_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)

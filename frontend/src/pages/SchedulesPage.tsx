@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { getSchedules, getTodaySchedule, triggerSchedule, createSchedule, listDataSources } from '../api/endpoints';
+import { getSchedules, getTodaySchedule, triggerSchedule, createSchedule, deleteSchedule, listDataSources } from '../api/endpoints';
 import type { Schedule, DataSource } from '../types';
 
 export default function SchedulesPage() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [todaySchedule, setTodaySchedule] = useState<(Schedule & { exists: boolean }) | null>(null);
   const [triggering, setTriggering] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   // Create modal state
   const [showCreate, setShowCreate] = useState(false);
@@ -77,6 +78,17 @@ export default function SchedulesPage() {
       setTimeout(loadData, 2000);
     } finally {
       setTriggering(null);
+    }
+  };
+
+  const handleDelete = async (scheduleId: string, date: string) => {
+    if (!confirm(`Delete schedule for ${date}?`)) return;
+    setDeleting(scheduleId);
+    try {
+      await deleteSchedule(scheduleId);
+      loadData();
+    } finally {
+      setDeleting(null);
     }
   };
 
@@ -357,6 +369,16 @@ export default function SchedulesPage() {
                       >
                         Results
                       </a>
+                    )}
+                    {s.status !== 'running' && (
+                      <button
+                        className="btn btn-danger"
+                        style={{ fontSize: '0.6875rem', padding: '0.25rem 0.5rem', marginLeft: '0.25rem' }}
+                        onClick={() => handleDelete(s.id, s.date)}
+                        disabled={deleting === s.id}
+                      >
+                        {deleting === s.id ? 'Deleting...' : 'Delete'}
+                      </button>
                     )}
                   </td>
                 </tr>

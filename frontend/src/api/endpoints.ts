@@ -214,6 +214,11 @@ export async function createSchedule(body: {
   return data;
 }
 
+export async function deleteSchedule(scheduleId: string) {
+  const { data } = await client.delete(`/schedules/${scheduleId}`);
+  return data;
+}
+
 // -- LMS Verification --
 
 export async function getLmsVerification(

@@ -92,7 +92,7 @@ async def get_today_schedule(db: AsyncSession = Depends(get_db)):
 
 @router.post("")
 async def create_schedule(body: CreateScheduleRequest, db: AsyncSession = Depends(get_db)):
-    """Create a new scheduled reconciliation for a given date."""
+    """Create a new scheduled reconciliation for a given date (multiple per date allowed)."""
     from datetime import date as date_type
     try:
         target_date = date_type.fromisoformat(body.date)
@@ -117,42 +117,6 @@ async def create_schedule(body: CreateScheduleRequest, db: AsyncSession = Depend
                 raise HTTPException(status_code=404, detail=f"{label} source not found")
             if row["status"] != "ready":
                 raise HTTPException(status_code=400, detail=f"{label} source is not ready (status: {row['status']})")
-
-    # Check if schedule already exists for this date — update it instead of rejecting
-    existing = await db.execute(
-        text("SELECT id, status FROM scheduled_reconciliations WHERE date = :d"),
-        {"d": target_date},
-    )
-    existing_row = existing.mappings().first()
-
-    if existing_row:
-        if existing_row["status"] in ("running", "completed"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Schedule for {target_date} is already {existing_row['status']}",
-            )
-        schedule_id = str(existing_row["id"])
-        await db.execute(
-            text(
-                """UPDATE scheduled_reconciliations
-                   SET bank_source_id = COALESCE(:bank, bank_source_id),
-                       bridge_source_id = COALESCE(:bridge, bridge_source_id),
-                       lms_source_id = COALESCE(:lms, lms_source_id),
-                       bank_ingested_at = CASE WHEN :bank IS NOT NULL THEN :now ELSE bank_ingested_at END,
-                       bridge_ingested_at = CASE WHEN :bridge IS NOT NULL THEN :now ELSE bridge_ingested_at END,
-                       lms_ingested_at = CASE WHEN :lms IS NOT NULL THEN :now ELSE lms_ingested_at END
-                   WHERE id = :id"""
-            ),
-            {
-                "id": schedule_id,
-                "bank": body.bank_source_id,
-                "bridge": body.bridge_source_id,
-                "lms": body.lms_source_id,
-                "now": now,
-            },
-        )
-        await db.commit()
-        return {"id": schedule_id, "date": body.date, "status": "waiting_sources", "message": "Schedule updated"}
 
     import uuid
     schedule_id = str(uuid.uuid4())
@@ -179,6 +143,27 @@ async def create_schedule(body: CreateScheduleRequest, db: AsyncSession = Depend
     await db.commit()
 
     return {"id": schedule_id, "date": body.date, "status": "waiting_sources", "message": "Schedule created"}
+
+
+@router.delete("/{schedule_id}")
+async def delete_schedule(schedule_id: str, db: AsyncSession = Depends(get_db)):
+    """Delete a scheduled reconciliation."""
+    result = await db.execute(
+        text("SELECT id, status FROM scheduled_reconciliations WHERE id = :id"),
+        {"id": schedule_id},
+    )
+    row = result.mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    if row["status"] == "running":
+        raise HTTPException(status_code=400, detail="Cannot delete a running schedule")
+
+    await db.execute(
+        text("DELETE FROM scheduled_reconciliations WHERE id = :id"),
+        {"id": schedule_id},
+    )
+    await db.commit()
+    return {"message": "Schedule deleted"}
 
 
 @router.post("/{schedule_id}/trigger")
